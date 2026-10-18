@@ -1,0 +1,18 @@
+﻿diff --git "a/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf\\fast\\common.cpp" "b/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf_build\\common.cpp"
+index f274ddb..ac73ac1 100644
+--- "a/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf\\fast\\common.cpp"
++++ "b/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf_build\\common.cpp"
+@@ -41,9 +41,13 @@ void model_state::allocate()
+ 
+ double tmsec()
+ {
++#ifdef _WIN32
++    return (double)GetTickCount64();
++#else
+     struct timespec ts;
+     clock_gettime(CLOCK_MONOTONIC,&ts);
+     return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
++#endif
+ }
+ 
+ string load_text_file(const char* fn)

@@ -1,0 +1,18 @@
+﻿diff --git "a/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf\\fast\\common.h" "b/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf_build\\common.h"
+index d226644..36ee382 100644
+--- "a/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf\\fast\\common.h"
++++ "b/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf_build\\common.h"
+@@ -28,7 +28,12 @@ struct model_file {
+     int n_context;
+     uint64_t kv_size;
+     uint64_t logits_size;
+-} __attribute((packed));
++}
++#ifdef _MSC_VER
++;
++#else
++__attribute((packed));
++#endif
+ 
+ struct model_state {
+     std::string model_fn; // model file name

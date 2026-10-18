@@ -1,0 +1,226 @@
+﻿diff --git "a/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf\\fast\\vdb.cpp" "b/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf_build\\vdb.cpp"
+index 7c86374..e9d6c7f 100644
+--- "a/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf\\fast\\vdb.cpp"
++++ "b/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf_build\\vdb.cpp"
+@@ -42,13 +42,6 @@ static string m_last_ai;
+ #define VDB_LOG_USER "<<<<<<<"
+ #define VDB_LOG_AI ">>>>>>>"
+ 
+-static inline bool bert_is_punct(unsigned char c)
+-{
+-    if ((c >= '!' && c <= '/') || (c >= ':' && c <= '@')) return true;
+-    if ((c >= '[' && c <= '`') || (c >= '{' && c <= '~')) return true;
+-    return false;
+-}
+-
+ void vdb_set_model(string model_fn)
+ {
+     if (m_brt.ready && m_brt.model_fn == model_fn) return;
+@@ -63,6 +56,7 @@ static bool ensure_bert()
+ {
+     if (m_brt.ready) return true;
+     if (m_brt.model_fn.empty()) return false;
++    fp1632_init();
+     assert(m_brt.m.open_mmap(m_brt.model_fn.c_str()));
+     assert(m_brt.m.read_gguf());
+     assert(m_brt.m.read_tokenizer());
+@@ -72,49 +66,135 @@ static bool ensure_bert()
+     return true;
+ }
+ 
++// --- UTF-8 杈呭姪 ---
++static inline size_t utf8_len(unsigned char c)
++{
++    if (c < 0x80) return 1;
++    if ((c & 0xE0) == 0xC0) return 2;
++    if ((c & 0xF0) == 0xE0) return 3;
++    if ((c & 0xF8) == 0xF0) return 4;
++    return 1;
++}
++
++static uint32_t utf8_cpt(const string &s, size_t i, size_t n)
++{
++    // 瑙ｇ爜涓€涓?UTF-8 鐮佺偣
++    unsigned char c = (unsigned char)s[i];
++    uint32_t cpt = 0;
++    if (n == 1) return c;
++    if (n == 2) cpt = (c & 0x1F) << 6;
++    if (n == 3) cpt = (c & 0x0F) << 12;
++    if (n == 4) cpt = (c & 0x07) << 18;
++    for (size_t k = 1; k < n; k++) {
++        unsigned char cc = (unsigned char)s[i + k];
++        if (n == 2) cpt |= (cc & 0x3F);
++        if (n == 3) cpt |= (cc & 0x3F) << (6 * (2 - k));
++        if (n == 4) cpt |= (cc & 0x3F) << (6 * (3 - k));
++    }
++    return cpt;
++}
++
++static bool is_chinese_char(uint32_t cpt)
++{
++    return (cpt >= 0x4E00 && cpt <= 0x9FFF) ||
++           (cpt >= 0x3400 && cpt <= 0x4DBF) ||
++           (cpt >= 0x20000 && cpt <= 0x2A6DF) ||
++           (cpt >= 0x2A700 && cpt <= 0x2B73F) ||
++           (cpt >= 0x2B740 && cpt <= 0x2B81F) ||
++           (cpt >= 0x2B920 && cpt <= 0x2CEAF) ||
++           (cpt >= 0xF900 && cpt <= 0xFAFF) ||
++           (cpt >= 0x2F800 && cpt <= 0x2FA1F);
++}
++
++static bool is_ws_cpt(uint32_t cpt)
++{
++    return cpt == ' ' || cpt == '\t' || cpt == '\n' || cpt == '\r' ||
++           cpt == '\f' || cpt == '\v' || cpt == 0x00A0 || cpt == 0x3000;
++}
++
++static bool is_punct_cpt(uint32_t cpt)
++{
++    if ((cpt >= '!' && cpt <= '/') || (cpt >= ':' && cpt <= '@')) return true;
++    if ((cpt >= '[' && cpt <= '`') || (cpt >= '{' && cpt <= '~')) return true;
++    return false;
++}
++
+ static vector<int> bert_tokenize(string in)
+ {
+     ensure_bert();
+     assert(m_brt.ready);
+ 
++    // 鍓ョ UTF-8 BOM(U+FEFF)涓庨浂瀹界┖鏍?+    while (in.size() >= 3 && (unsigned char)in[0] == 0xEF && (unsigned char)in[1] == 0xBB && (unsigned char)in[2] == 0xBF)
++        in = in.substr(3);
++
++    // ---- preprocess: 澶嶅埢 llama.cpp WPM 鐨?word 鎷嗗垎 ----
++    // 1) 鎸夌┖鐧姐€丄SCII 鏍囩偣銆佷腑鏂囬€愬瓧鎷嗗垎 word
++    // 2) lowercase 浠?ASCII
++    vector<string> words;
++    string cur;
++    size_t i = 0;
++    while (i < in.size()) {
++        size_t n = utf8_len((unsigned char)in[i]);
++        if (i + n > in.size()) n = 1;
++        uint32_t cpt = utf8_cpt(in, i, n);
++        string s = in.substr(i, n);
++
++        if (is_ws_cpt(cpt)) {
++            if (!cur.empty()) { words.push_back(cur); cur.clear(); }
++            i += n;
++            continue;
++        }
++        if (cpt == 0 || cpt == 0xFFFD) { i += n; continue; }
++
++        // lowercase ASCII
++        if (n == 1 && cpt >= 'A' && cpt <= 'Z') s[0] = (char)(cpt + 32);
++
++        if (is_punct_cpt(cpt) || (n == 1 && cpt < 0x7F && (cpt >= 0x21 && cpt <= 0x7E && !isalnum((unsigned char)s[0]))) || is_chinese_char(cpt)) {
++            if (!cur.empty()) { words.push_back(cur); cur.clear(); }
++            words.push_back(s);       // 鍗曞瓧绗?word
++            i += n;
++            continue;
++        }
++        cur += s;
++        i += n;
++    }
++    if (!cur.empty()) words.push_back(cur);
++
++    // ---- tokenize: 姣忎釜 word 鍓嶇紑 鈻? 鏈€闀胯椽蹇冨尮閰?----
++    const string PHANTOM = "\xE2\x96\x81";  // 鈻?U+2581
+     vector<int> out;
+-    for (auto &c : in) c = tolower(c);
+-    int i = 0;
+-    while (i < (int)in.size()) {
+-        while (i < (int)in.size() && isspace(in[i])) i++;
+-        if (i >= (int)in.size()) break;
+-
+-        int j = i;
+-        while (j < (int)in.size() && !isspace(in[j]) && !bert_is_punct(in[j])) j++;
+-        if (j == i && bert_is_punct(in[j])) j++;
+-
+-        bool bad = false;
+-        int pos = i;
+-        while (pos < j) {
+-            int found = -1;
+-            int found_end = pos;
+-
+-            for (int end = j; end > pos; end--) {
+-                string part = in.substr(pos,end-pos);
+-                if (pos > i) part = "##" + part;
+-                if (m_brt.m.tokens_rev.count(part)) {
+-                    found = m_brt.m.tokens_rev[part];
+-                    found_end = end;
++    int max_len = 0;
++    for (const auto &kv : m_brt.m.tokens_rev) {
++        if ((int)kv.first.size() > max_len) max_len = (int)kv.first.size();
++    }
++
++    for (const string &word : words) {
++        if (word.empty()) continue;
++        const string w1 = PHANTOM + word;
++        const int n = (int)w1.size();
++        const size_t cur_tok = out.size();
++        int ipos = 0;
++        bool word_ok = true;
++        while (ipos < n) {
++            bool match = false;
++            int jmax = std::min<int>(n, ipos + max_len + 1);
++            for (int j = jmax; j > ipos; j--) {
++                auto it = m_brt.m.tokens_rev.find(w1.substr(ipos, j - ipos));
++                if (it != m_brt.m.tokens_rev.end()) {
++                    out.push_back(it->second);
++                    match = true;
++                    ipos = j;
+                     break;
+                 }
+             }
+-
+-            if (found < 0) {
+-                bad = true;
++            if (!match) {
++                out.resize(cur_tok);   // 涓㈠純鏁翠釜 word
++                word_ok = false;
+                 break;
+             }
+-
+-            out.push_back(found);
+-            pos = found_end;
+         }
+-
+-        if (bad) out.push_back(m_brt.m.tok_unk);
+-        i = j;
++        if (!word_ok) out.push_back(m_brt.m.tok_unk);
+     }
+ 
+     return out;
+@@ -381,7 +461,11 @@ static string rec_to_prompt(const vdb_entry &e)
+     char tsbuf[128];
+     time_t tt = e.timestamp;
+     struct tm tmv;
++#ifdef _WIN32
++    localtime_s(&tmv,&tt);
++#else
+     localtime_r(&tt,&tmv);
++#endif
+     strftime(tsbuf,sizeof(tsbuf),"%Y-%m-%d %H:%M:%S %Z",&tmv);
+ 
+     string out = "At ";
+@@ -434,3 +518,21 @@ void vdb_log_turn(string &log, string user, string ai)
+     if (ensure_bert()) m_vdb.push_back(make_entry(ts,m_last_ai,user,ai));
+     m_last_ai = ai;
+ }
++
++// ---- 瀵煎嚭:鍔犺浇 BERT 妯″瀷,杩斿洖涓€鏉℃枃鏈殑 embedding ----
++// 杩斿洖 0 鎴愬姛;>0 澶辫触
++extern "C" int vdb_embed_export(const char* model_fn, const char* text, float* out, int maxdim)
++{
++    vdb_set_model(model_fn);
++    if (!ensure_bert()) return 1;
++    ftensor emb;
++    vector<int> toks = bert_tokenize(string(text));
++    fprintf(stderr, "[tokens] text='%s'\n  ->", string(text).substr(0, 20).c_str());
++    for (size_t i = 0; i < toks.size() && i < 30; i++) fprintf(stderr, " %d", toks[i]);
++    fprintf(stderr, " (n=%d)\n", (int)toks.size());
++    bert_embed(string(text), emb);
++    int n = (int)emb.size();
++    if (maxdim < n) return 5;
++    for (int i = 0; i < n; i++) out[i] = emb[i];
++    return 0;
++}

@@ -1,0 +1,77 @@
+﻿diff --git "a/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf\\fast\\lil_gguf.cpp" "b/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf_build\\lil_gguf.cpp"
+index 6b6e8fc..6a624e4 100644
+--- "a/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf\\fast\\lil_gguf.cpp"
++++ "b/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf_build\\lil_gguf.cpp"
+@@ -3,10 +3,7 @@
+  * */
+ 
+ #include <assert.h>
+-#include <fcntl.h>
+ #include <time.h>
+-#include <sys/mman.h>
+-#include <sys/stat.h>
+ #include "common.h"
+ #include "lil_gguf.h"
+ 
+@@ -228,6 +225,38 @@ bool gguf_model::open_mmap(const char* fn)
+ {
+     fsize = 0;
+     base = NULL;
++#ifdef _WIN32
++    FILE* f = fopen(fn,"rb");
++    if (!f) {
++        ERR("Can't open file %s",fn);
++        return false;
++    }
++    fseek(f,0,SEEK_END);
++    long sz = ftell(f);
++    fseek(f,0,SEEK_SET);
++    if (sz <= 0) {
++        ERR("Can't stat file %s",fn);
++        fclose(f);
++        close_mmap();
++        return false;
++    }
++    fsize = (size_t)sz;
++    base = (uint8_t*)malloc(fsize + 64);
++    if (!base) {
++        ERR("Can't alloc %ld bytes",(long)fsize);
++        fclose(f);
++        close_mmap();
++        return false;
++    }
++    size_t rd = fread(base,1,fsize,f);
++    fclose(f);
++    if (rd != fsize) {
++        ERR("short read %zu/%zu",rd,fsize);
++        close_mmap();
++        return false;
++    }
++    return true;
++#else
+     file = open(fn,O_RDONLY);
+     if (file == -1) {
+         ERR("Can't open file %s",fn);
+@@ -250,15 +279,22 @@ bool gguf_model::open_mmap(const char* fn)
+     }
+ 
+     return true;
++#endif
+ }
+ 
+ void gguf_model::close_mmap()
+ {
++#ifdef _WIN32
++    if (base) free(base);
++    base = NULL;
++    fsize = 0;
++#else
+     if (base && base != MAP_FAILED && fsize) munmap(base, fsize);
+     if (file != -1) close(file);
+     base = NULL;
+     fsize = 0;
+     file = -1;
++#endif
+ }
+ 
+ bool gguf_model::read_tokenizer()

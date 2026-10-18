@@ -1,0 +1,18 @@
+﻿diff --git "a/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf\\fast\\lil_gguf.h" "b/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf_build\\lil_gguf.h"
+index 25e3a98..de55b60 100644
+--- "a/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf\\fast\\lil_gguf.h"
++++ "b/C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\opencode\\ligguf_build\\lil_gguf.h"
+@@ -9,10 +9,12 @@
+ #include <stdint.h>
+ #include <math.h>
+ #include <string.h>
+-#include <unistd.h>
+ #include <vector>
+ #include <string>
+ #include <map>
++#ifdef _WIN32
++#include <windows.h>
++#endif
+ 
+ // Base constants
+ #define ALIGNMENT 32

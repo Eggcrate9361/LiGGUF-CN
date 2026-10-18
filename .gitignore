@@ -1,0 +1,15 @@
+# 构建产物（README 里写了复现命令，随时能重新生成）
+*.obj
+*.exe
+*.dll
+*.lib
+*.exp
+*.pdb
+*.ilk
+
+# 基准测试的向量 dump（compare.py 可重新生成）
+bench/*.bin
+
+# Python
+__pycache__/
+*.pyc
